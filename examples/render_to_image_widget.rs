@@ -30,7 +30,7 @@ struct PreviewPassCube;
 #[derive(Component)]
 struct MainPassCube;
 
-#[derive(Deref)]
+#[derive(Deref, Resource)]
 struct CubePreviewImage(Handle<Image>);
 
 fn setup(

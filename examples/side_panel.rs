@@ -1,7 +1,7 @@
 use bevy::{prelude::*, render::camera::Projection};
 use bevy_egui::{egui, EguiContext, EguiPlugin};
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 struct OccupiedScreenSpace {
     left: f32,
     top: f32,
@@ -11,6 +11,7 @@ struct OccupiedScreenSpace {
 
 const CAMERA_TARGET: Vec3 = Vec3::ZERO;
 
+#[derive(Resource)]
 struct OriginalCameraTransform(Transform);
 
 fn main() {

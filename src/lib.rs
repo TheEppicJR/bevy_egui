@@ -65,7 +65,7 @@ use bevy::{
     ecs::{
         event::EventReader,
         schedule::{ParallelSystemDescriptorCoercion, SystemLabel},
-        system::ResMut,
+        system::{ResMut, Resource},
     },
     input::InputSystem,
     log,
@@ -74,7 +74,7 @@ use bevy::{
     window::WindowId,
 };
 use egui_node::EguiNode;
-use render_systems::EguiTransforms;
+use render_systems::{EguiTransforms, ExtractedRenderOutput, ExtractedWindowSizes};
 #[cfg(all(feature = "manage_clipboard", not(target_arch = "wasm32")))]
 use std::cell::{RefCell, RefMut};
 #[cfg(all(feature = "manage_clipboard", not(target_arch = "wasm32")))]
@@ -84,7 +84,7 @@ use thread_local::ThreadLocal;
 pub struct EguiPlugin;
 
 /// A resource for storing global UI settings.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Resource)]
 pub struct EguiSettings {
     /// Global scale factor for egui widgets (`1.0` by default).
     ///
@@ -129,7 +129,7 @@ pub struct EguiInput {
 ///
 /// The resource is available only if `manage_clipboard` feature is enabled.
 #[cfg(feature = "manage_clipboard")]
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct EguiClipboard {
     #[cfg(not(target_arch = "wasm32"))]
     clipboard: ThreadLocal<Option<RefCell<Clipboard>>>,
@@ -217,7 +217,7 @@ pub struct EguiOutput {
 }
 
 /// A resource for storing `bevy_egui` context.
-#[derive(Clone)]
+#[derive(Clone, Resource)]
 pub struct EguiContext {
     ctx: HashMap<WindowId, egui::Context>,
     user_textures: HashMap<Handle<Image>, u64>,
@@ -433,10 +433,10 @@ impl Plugin for EguiPlugin {
     fn build(&self, app: &mut App) {
         let world = &mut app.world;
         world.insert_resource(EguiSettings::default());
-        world.insert_resource(HashMap::<WindowId, EguiInput>::default());
-        world.insert_resource(HashMap::<WindowId, EguiOutput>::default());
-        world.insert_resource(HashMap::<WindowId, WindowSize>::default());
-        world.insert_resource(HashMap::<WindowId, EguiRenderOutput>::default());
+        world.insert_resource(ExtractedInput::default());
+        world.insert_resource(ExtractedOutput::default());
+        world.insert_resource(ExtractedWindowSizes::default());
+        world.insert_resource(ExtractedRenderOutput::default());
         world.insert_resource(EguiManagedTextures::default());
         #[cfg(feature = "manage_clipboard")]
         world.insert_resource(EguiClipboard::default());
@@ -490,7 +490,7 @@ impl Plugin for EguiPlugin {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub(crate) struct EguiManagedTextures(HashMap<(WindowId, u64), EguiManagedTexture>);
 
 pub(crate) struct EguiManagedTexture {
@@ -500,11 +500,11 @@ pub(crate) struct EguiManagedTexture {
 }
 
 fn update_egui_textures(
-    mut egui_render_output: ResMut<HashMap<WindowId, EguiRenderOutput>>,
+    mut egui_render_output: ResMut<ExtractedRenderOutput>,
     mut egui_managed_textures: ResMut<EguiManagedTextures>,
     mut image_assets: ResMut<Assets<Image>>,
 ) {
-    for (&window_id, egui_render_output) in egui_render_output.iter_mut() {
+    for (&window_id, egui_render_output) in egui_render_output.as_mut().0.iter_mut() {
         let set_textures = std::mem::take(&mut egui_render_output.textures_delta.set);
 
         for (texture_id, image_delta) in set_textures {
@@ -553,12 +553,12 @@ fn update_egui_textures(
 
 fn free_egui_textures(
     mut egui_context: ResMut<EguiContext>,
-    mut egui_render_output: ResMut<HashMap<WindowId, EguiRenderOutput>>,
+    mut egui_render_output: ResMut<ExtractedRenderOutput>,
     mut egui_managed_textures: ResMut<EguiManagedTextures>,
     mut image_assets: ResMut<Assets<Image>>,
     mut image_events: EventReader<AssetEvent<Image>>,
 ) {
-    for (&window_id, egui_render_output) in egui_render_output.iter_mut() {
+    for (&window_id, egui_render_output) in egui_render_output.0.iter_mut() {
         let free_textures = std::mem::take(&mut egui_render_output.textures_delta.free);
         for texture_id in free_textures {
             if let egui::TextureId::Managed(texture_id) = texture_id {

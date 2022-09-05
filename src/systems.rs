@@ -1,10 +1,13 @@
-use crate::{EguiContext, EguiInput, EguiOutput, EguiRenderOutput, EguiSettings, WindowSize};
+use crate::{
+    render_systems::{ExtractedRenderOutput, ExtractedWindowSizes},
+    EguiContext, EguiInput, EguiOutput, EguiSettings, WindowSize,
+};
 #[cfg(feature = "open_url")]
 use bevy::log;
 use bevy::{
     ecs::{
         event::EventWriter,
-        system::{Local, Res, ResMut, SystemParam},
+        system::{Local, Res, ResMut, SystemParam, Resource},
     },
     input::{
         keyboard::{KeyCode, KeyboardInput},
@@ -33,12 +36,17 @@ pub struct InputEvents<'w, 's> {
     ev_window_created: EventReader<'w, 's, WindowCreated>,
 }
 
+#[derive(Resource, Default)]
+pub struct ExtractedOutput(pub HashMap<WindowId, EguiOutput>);
+#[derive(Resource, Default)]
+pub struct ExtractedInput(pub HashMap<WindowId, EguiInput>);
+
 #[derive(SystemParam)]
 pub struct InputResources<'w, 's> {
     #[cfg(feature = "manage_clipboard")]
     egui_clipboard: Res<'w, crate::EguiClipboard>,
     keyboard_input: Res<'w, Input<KeyCode>>,
-    egui_input: ResMut<'w, HashMap<WindowId, EguiInput>>,
+    egui_input: ResMut<'w, ExtractedInput>,
     #[system_param(ignore)]
     marker: PhantomData<&'s usize>,
 }
@@ -47,14 +55,14 @@ pub struct InputResources<'w, 's> {
 pub struct WindowResources<'w, 's> {
     focused_window: Local<'s, Option<WindowId>>,
     windows: ResMut<'w, Windows>,
-    window_sizes: ResMut<'w, HashMap<WindowId, WindowSize>>,
+    window_sizes: ResMut<'w, ExtractedWindowSizes>,
     #[system_param(ignore)]
     _marker: PhantomData<&'s usize>,
 }
 
 pub fn init_contexts_on_startup(
     mut egui_context: ResMut<EguiContext>,
-    mut egui_input: ResMut<HashMap<WindowId, EguiInput>>,
+    mut egui_input: ResMut<ExtractedInput>,
     mut window_resources: WindowResources,
     egui_settings: Res<EguiSettings>,
 ) {
@@ -138,13 +146,13 @@ pub fn process_input(
         if cursor_left_window != Some(cursor_moved.id) {
             let scale_factor = egui_settings.scale_factor as f32;
             let mut mouse_position: (f32, f32) = (cursor_moved.position / scale_factor).into();
-            mouse_position.1 = window_resources.window_sizes[&cursor_moved.id].height()
+            mouse_position.1 = window_resources.window_sizes.0[&cursor_moved.id].height()
                 / scale_factor
                 - mouse_position.1;
             egui_context.mouse_position = Some((cursor_moved.id, mouse_position.into()));
             input_resources
                 .egui_input
-                .get_mut(&cursor_moved.id)
+                .0.get_mut(&cursor_moved.id)
                 .unwrap()
                 .raw_input
                 .events
@@ -159,7 +167,7 @@ pub fn process_input(
     let mouse_button_event_iter = input_events.ev_mouse_button_input.iter();
     let mouse_wheel_event_iter = input_events.ev_mouse_wheel.iter();
     if let Some((window_id, position)) = egui_context.mouse_position.as_ref() {
-        if let Some(egui_input) = input_resources.egui_input.get_mut(window_id) {
+        if let Some(egui_input) = input_resources.egui_input.0.get_mut(window_id) {
             let events = &mut egui_input.raw_input.events;
 
             for mouse_button_event in mouse_button_event_iter {
@@ -214,7 +222,7 @@ pub fn process_input(
             if !event.char.is_control() {
                 input_resources
                     .egui_input
-                    .get_mut(&event.id)
+                    .0.get_mut(&event.id)
                     .unwrap()
                     .raw_input
                     .events
@@ -226,7 +234,7 @@ pub fn process_input(
     if let Some(focused_input) = window_resources
         .focused_window
         .as_ref()
-        .and_then(|window_id| input_resources.egui_input.get_mut(window_id))
+        .and_then(|window_id| input_resources.egui_input.0.get_mut(window_id))
     {
         for ev in input_events.ev_keyboard_input.iter() {
             if let Some(key) = ev.key_code.and_then(bevy_to_egui_key) {
@@ -269,19 +277,19 @@ pub fn process_input(
         focused_input.raw_input.modifiers = modifiers;
     }
 
-    for egui_input in input_resources.egui_input.values_mut() {
+    for egui_input in input_resources.egui_input.0.values_mut() {
         egui_input.raw_input.predicted_dt = time.delta_seconds();
     }
 }
 
 fn update_window_contexts(
     egui_context: &mut EguiContext,
-    egui_input: &mut HashMap<WindowId, EguiInput>,
+    egui_input: &mut ExtractedInput,
     window_resources: &mut WindowResources,
     egui_settings: &EguiSettings,
 ) {
     for window in window_resources.windows.iter() {
-        let egui_input = egui_input.entry(window.id()).or_default();
+        let egui_input = egui_input.0.entry(window.id()).or_default();
 
         let window_size = WindowSize::new(
             window.physical_width() as f32,
@@ -309,17 +317,17 @@ fn update_window_contexts(
 
         window_resources
             .window_sizes
-            .insert(window.id(), window_size);
+            .as_mut().0.insert(window.id(), window_size);
         egui_context.ctx.entry(window.id()).or_default();
     }
 }
 
 pub fn begin_frame(
     mut egui_context: ResMut<EguiContext>,
-    mut egui_input: ResMut<HashMap<WindowId, EguiInput>>,
+    mut egui_input: ResMut<ExtractedInput>,
 ) {
     for (id, ctx) in egui_context.ctx.iter_mut() {
-        let raw_input = egui_input.get_mut(id).unwrap().raw_input.take();
+        let raw_input = egui_input.as_mut().0.get_mut(id).unwrap().raw_input.take();
         ctx.begin_frame(raw_input);
     }
 }
@@ -329,8 +337,8 @@ pub fn process_output(
         EguiSettings,
     >,
     mut egui_context: ResMut<EguiContext>,
-    mut egui_output: ResMut<HashMap<WindowId, EguiOutput>>,
-    mut egui_render_output: ResMut<HashMap<WindowId, EguiRenderOutput>>,
+    mut egui_output: ResMut<ExtractedOutput>,
+    mut egui_render_output: ResMut<ExtractedRenderOutput>,
     #[cfg(feature = "manage_clipboard")] mut egui_clipboard: ResMut<crate::EguiClipboard>,
     mut windows: Option<ResMut<Windows>>,
     mut event: EventWriter<RequestRedraw>,
@@ -344,11 +352,11 @@ pub fn process_output(
             repaint_after,
         } = full_output;
 
-        let egui_render_output = egui_render_output.entry(*window_id).or_default();
+        let egui_render_output = egui_render_output.as_mut().0.entry(*window_id).or_default();
         egui_render_output.shapes = shapes;
         egui_render_output.textures_delta.append(textures_delta);
 
-        egui_output.entry(*window_id).or_default().platform_output = platform_output.clone();
+        egui_output.as_mut().0.entry(*window_id).or_default().platform_output = platform_output.clone();
 
         #[cfg(feature = "manage_clipboard")]
         if !platform_output.copied_text.is_empty() {

@@ -8,6 +8,7 @@ use once_cell::sync::Lazy;
 
 static SECOND_WINDOW_ID: Lazy<WindowId> = Lazy::new(WindowId::new);
 
+#[derive(Resource)]
 struct Images {
     bevy_icon: Handle<Image>,
 }
@@ -72,7 +73,7 @@ struct UiState {
     input: String,
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 struct SharedUiState {
     shared_input: String,
 }
